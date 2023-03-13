@@ -1,23 +1,10 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef } from 'react';
 import './App.css';
-import WithMemo from './ComponentWithMemo';
-import WithoutMemo from './ComponentWithoutMemo';
 
-import { client, applePay } from 'braintree-web';
-
-const WrapChild: React.FC<{count: number}> = ({ count }) => {
-  return (
-    <div>
-      <p>Count {count}</p>
-      <WithMemo />
-      <WithoutMemo />
-    </div>
-  )
-}
+import { client, applePay, ApplePaySession } from 'braintree-web';
 
 function App() {
-  const [count, setCount] = useState(0);
-  const [canMakePayments, setCanMakePayments] = useState(false);
+  const applePayInstanceFinal = useRef();
 
   const initial = async () => {
     client.create({
@@ -32,39 +19,77 @@ function App() {
           return console.log('Apple pay error', applePayError);
         }
 
-        const paymentRequest = applePayInstance?.createPaymentRequest({
-          total: {
-            label: 'Kayo Package',
-            amount: '19.99'
-          }
-        })
-
+        // applePayInstance?.performValidation()
         // @ts-ignore
-        const session = new ApplePaySession(3, paymentRequest);
-        session.onpaymentauthorized = function (event: any) {
-          applePayInstance?.tokenize({
-            token: event.payment.token
-          }, function (tokenizeErr, tokenizedPayload) {
-            if (tokenizeErr) {
-              // @ts-ignore
-              session.completePayment(ApplePaySession.STATUS_FAILURE);
-              return;
-            }
-            // @ts-ignore
-            session.completePayment(ApplePaySession.STATUS_SUCCESS);
-      
-            // Send the tokenizedPayload to your server here!
-          });
-        };
-      
-       
+        applePayInstanceFinal.current = applePayInstance;
       })
     })
   }
 
+  const handleSubmit = useCallback(() => {
+    console.log('Submit clicked', applePayInstanceFinal);
+    if (applePayInstanceFinal.current) {
+      // @ts-ignore
+      const paymentRequest = applePayInstanceFinal.current?.createPaymentRequest({
+        total: {
+          label: 'Kayo Package',
+          amount: '19.99'
+        }
+      })
+
+      console.log('Package created', paymentRequest);
+
+      // @ts-ignore
+      const session: ApplePaySession = new window.ApplePaySession(3, paymentRequest);
+
+      session.onvalidatemerchant = function (event: any) {
+        // @ts-ignore
+        applePayInstanceFinal.current?.performValidation({
+          validationURL: event.validationURL,
+          displayName: 'My Great Store'
+        }, function (validationErr: any, validationData: any) {
+          if (validationErr) {
+            console.error(validationErr);
+            session.abort();
+            return;
+          }
+    
+          session.completeMerchantValidation(validationData);
+        });
+      };
+
+      session.onpaymentauthorized = function (event: any) {
+        // @ts-ignore
+        applePayInstanceFinal.current?.tokenize({
+          token: event.payment.token
+        }, function (tokenizeErr: any, tokenizedPayload: any) {
+          if (tokenizeErr) {
+            console.log('====ERROR on process payment', tokenizeErr);
+            alert('Error with payment');
+            // @ts-ignore
+            session.completePayment(ApplePaySession.STATUS_FAILURE);
+            return;
+          }
+          console.log('Payment completed', tokenizedPayload);
+          // @ts-ignore
+          session.completePayment(ApplePaySession.STATUS_SUCCESS);
+    
+          // Send the tokenizedPayload to your server here!
+        });
+      };
+
+      session.begin();
+    }
+  }, [applePayInstanceFinal]);
+
+  useEffect(() => {
+    initial();
+  }, []);
+
   return (
     <div className="App">
-      <button onClick={() => initial()}>Go go go</button>
+      <button onClick={() => handleSubmit()}>Pay with Apple</button>
+      <div>v1.11</div>
     </div>
   );
 }
